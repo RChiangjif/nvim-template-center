@@ -1,0 +1,5 @@
+# plugin manager 會自己產生
+doc/tags
+
+# 本機工具設定
+.claude/settings.local.json

@@ -1,0 +1,184 @@
+*template-center.txt*  A template library for competitive programming
+
+==============================================================================
+CONTENTS                                              *template-center-contents*
+
+  1. Introduction ............... |template-center-intro|
+  2. Commands ................... |template-center-commands|
+  3. Saving templates ........... |template-center-save|
+  4. Finding and inserting ...... |template-center-find|
+  5. The sidebar ................ |template-center-explorer|
+  6. Snippet placeholders ....... |template-center-snippet|
+  7. Configuration .............. |template-center-config|
+  8. Lua API .................... |template-center-api|
+
+==============================================================================
+1. INTRODUCTION                                          *template-center-intro*
+
+Keeps your competitive programming templates inside Neovim: save a visual
+selection, pull it back up from a picker, and manage the library in a sidebar
+that is both collapsible and directly editable.
+
+Requires Neovim 0.10 or newer. telescope.nvim is optional; without it the
+picker falls back to |vim.ui.select|.
+
+Templates are ordinary files and directories are categories. Default location: >
+    ~/.local/share/nvim/template-center/
+<
+==============================================================================
+2. COMMANDS                                           *template-center-commands*
+
+                                                              *:TemplateCenter*
+:TemplateCenter [subcommand] [args]
+
+    find          Open the picker; the choice is inserted at the cursor.
+                  This is the default when no subcommand is given.
+    save          Save the range (or the whole buffer) as a template
+    insert {name} Insert by name, with completion
+    edit          Open the picker; the choice is opened for editing
+    tree          Toggle the library sidebar
+    root          Open the library directory in a normal window
+
+==============================================================================
+3. SAVING TEMPLATES                                       *template-center-save*
+
+Select in visual mode, then: >
+    :'<,'>TemplateCenter save [name]
+<
+You are asked for a name (unless given as an argument), a category, and a
+description. A slash in the name specifies the category inline, for example
+`cpp/graph/dinic`. The category defaults to the current buffer's 'filetype'.
+
+The selection's common indentation is stripped (`capture.dedent`) while
+relative indentation inside it is preserved. The extension is taken from the
+source file, falling back to the `extensions` table.
+
+Suggested mapping: >
+    vim.keymap.set("v", "<leader>ts", ":TemplateCenter save<CR>")
+<
+==============================================================================
+4. FINDING AND INSERTING                                  *template-center-find*
+
+`:TemplateCenter find` opens the picker. Name, category and description are all
+fuzzy-searchable.
+
+telescope mappings: >
+    <CR>    Insert into the buffer you came from
+    <C-e>   Open the template file itself for editing
+    <C-y>   Copy to a register
+    <C-o>   Open the sidebar with this template revealed
+<
+Without telescope the picker falls back to |vim.ui.select| — dressing.nvim,
+snacks.nvim and fzf-lua all take that hook over, so whichever you have
+installed is what you get. The fallback can only offer a single action, which
+is why "pick one and open it for editing" is the separate command
+`:TemplateCenter edit`.
+
+The template is re-indented to match the line the cursor is on. If the cursor
+sits on a blank line, the template replaces it rather than pushing it down.
+
+==============================================================================
+5. THE SIDEBAR                                        *template-center-explorer*
+
+`:TemplateCenter tree` opens a collapsible tree of the library.
+
+The buffer is editable, so `o`, `dd`, `cc`, `p` and `u` keep their usual
+meanings: >
+    Edit the text on a line     Rename (extension included)
+    dd                          Delete (into .trash/, not actually removed)
+    o and type a line           New empty template; end with / for a directory
+    Indent one level            Move into the directory above
+    Outdent                     Move out
+    yyp then rename             Make a copy
+<
+Structure is expressed through **indentation**, so names must not contain
+slashes. Changes are applied on `:w`, after a confirmation listing every
+operation (`explorer.confirm`). If any line is invalid the entire write is
+rejected with the offending line number — it never applies half of an edit:
+
+    - Something indented underneath a file
+    - Indentation jumping more than one level at a time
+    - A duplicate name within the same level
+    - A name containing a path separator
+    - A target that already exists (possibly inside a collapsed directory)
+    - A directory and its child swapping places (do it in two writes)
+
+Children of a collapsed directory are never rendered, so they never enter the
+diff. Saving with directories collapsed cannot make invisible files disappear.
+
+Mappings, all configurable via `explorer.keymaps` (set one to false to
+disable): >
+    <CR>        Directory: expand/collapse. File: open it
+    <Tab>       Expand/collapse without opening
+    <C-s>       Open in a split
+    <C-t>       Open in a new tab
+    <C-p>       Preview in a floating window
+    gi          Insert this template into the buffer you came from
+    gr          Reload, discarding unsaved edits
+    g?          Help
+    q           Close the sidebar (shadows macro recording)
+<
+==============================================================================
+6. SNIPPET PLACEHOLDERS                                *template-center-snippet*
+
+Template contents may contain placeholders: >
+    struct SegTree {
+        int n = ${1:MAXN};
+        $0
+    };
+<
+When a template contains `$<digit>` or `${<digit>`, it is inserted through
+|vim.snippet.expand()| so you can move between placeholders with
+|vim.snippet.jump()| (bound to <Tab> by default in Neovim 0.11).
+
+Detection is limited to the `$1` / `${1:...}` shape, so a lone `$` in a shell
+or LaTeX template will not trigger it. Set `insert.snippet` to false to turn
+the behaviour off entirely.
+
+==============================================================================
+7. CONFIGURATION                                        *template-center-config*
+
+>lua
+    require("template-center").setup({
+      dir = vim.fs.joinpath(vim.fn.stdpath("data"), "template-center"),
+      picker = "auto",          -- "auto" | "telescope" | "select"
+      extensions = { cpp = "cpp", python = "py" },
+      capture = {
+        dedent = true,
+        ask_category = true,
+        ask_description = true,
+      },
+      insert = {
+        position = "below",     -- "below" | "above" | "top"
+        reindent = true,
+        snippet = "auto",       -- "auto" | true | false
+        top_after = { "^#include", "^#pragma" },
+      },
+      explorer = {
+        side = "left",          -- "left" | "right"
+        width = 34,
+        indent = 2,
+        confirm = true,
+        trash = true,
+        keymaps = { ["<CR>"] = "open_or_toggle" },
+      },
+    })
+<
+Point `dir` at your own git repository to get version control and sync across
+machines.
+
+==============================================================================
+8. LUA API                                                 *template-center-api*
+
+>lua
+    local tc = require("template-center")
+
+    tc.save({ line1 = 1, line2 = 10, name = "dinic" })
+    tc.save_selection()   -- call this from a visual mode mapping
+    tc.find()             -- pick and insert
+    tc.edit()             -- pick and open for editing
+    tc.insert("dinic")    -- insert by name
+    tc.toggle_tree()
+    tc.root()             -- path to the library
+<
+vim:tw=78:ts=8:ft=help:norl:
