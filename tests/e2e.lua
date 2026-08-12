@@ -1,8 +1,10 @@
--- 走完整條路：visual 選取 → 存模板 → picker → 插入 → 側邊欄展開／編輯／存檔。
--- vim.ui.input / vim.ui.select 會被換成自動作答的版本（這也順便驗證了
--- fallback picker 真的只用得到這兩個 hook）。
+-- The whole path: select in visual mode → save → pick → insert → expand, edit
+-- and write the sidebar. vim.ui.input and vim.ui.select are swapped for versions
+-- that answer themselves, which doubles as proof that the fallback picker really
+-- does need nothing but those two hooks.
 --
--- 這是一串有先後順序的情境，後面的測試吃前面留下的模板庫狀態。
+-- These are sequential scenarios: later tests build on the library state left by
+-- the earlier ones.
 
 local config = require("template-center.config")
 local store = require("template-center.store")
@@ -12,7 +14,8 @@ return function(h)
 
   print("\n[e2e]")
 
-  -- 先把 picker 釘在 fallback，才不會因為這台機器剛好有 telescope 就測不到它。
+  -- Pin the picker to the fallback so it still gets tested on a machine that
+  -- happens to have telescope installed.
   local dir = fresh({ picker = "select", explorer = { confirm = false } })
 
   ---@param list string[]
@@ -24,9 +27,9 @@ return function(h)
     end
   end
 
-  -- ---------------------------------------------------------------- capture --
+  -- ------------------------------------------------------------------ capture --
 
-  answer_with({ "cpp/graph", "最大流" }) -- 名稱由引數給，接著問分類、說明
+  answer_with({ "cpp/graph", "max flow" }) -- name comes from the argument, then category and description
 
   local src = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_name(src, dir .. "/scratch.cpp")
@@ -40,11 +43,11 @@ return function(h)
   vim.api.nvim_set_current_buf(src)
   require("template-center.capture").save({ line1 = 2, line2 = 4, name = "loop" })
 
-  test("capture 依分類存進 cpp/graph/loop.cpp", function()
+  test("capture files it under the category as cpp/graph/loop.cpp", function()
     truthy(store.exists("cpp/graph/loop.cpp"))
   end)
 
-  test("capture 去掉共同縮排、保留內部縮排", function()
+  test("capture strips the shared indentation and keeps the inner one", function()
     eq(store.read("cpp/graph/loop.cpp"), {
       "for (int i = 0; i < n; i++) {",
       "    work(i);",
@@ -52,11 +55,11 @@ return function(h)
     })
   end)
 
-  test("capture 記下說明", function()
-    eq(store.get_desc("cpp/graph/loop.cpp"), "最大流")
+  test("capture records the description", function()
+    eq(store.get_desc("cpp/graph/loop.cpp"), "max flow")
   end)
 
-  -- --------------------------------------------------- picker fallback + 插入 --
+  -- ------------------------------------------------------ fallback picker + insert --
 
   store.write("cpp/snip.cpp", { "int ${1:n};", "$0" })
 
@@ -72,19 +75,19 @@ return function(h)
   vim.api.nvim_win_set_cursor(0, { 2, 4 })
   require("template-center.picker").find()
 
-  test("fallback picker 拿到全部模板", function()
+  test("the fallback picker receives every template", function()
     eq(shown.n, 2)
   end)
 
-  test("fallback picker 帶上 kind 給 dressing 之類的實作分派", function()
+  test("the fallback picker passes a kind for implementations like dressing", function()
     eq(shown.kind, "template-center")
   end)
 
-  test("fallback picker 一行顯示名稱、分類、說明", function()
-    eq(shown.first, "loop (cpp/graph) — 最大流")
+  test("the fallback picker shows name, category and description on one line", function()
+    eq(shown.first, "loop (cpp/graph) — max flow")
   end)
 
-  test("插入時對齊游標縮排，並吃掉原本的空行", function()
+  test("inserting matches the cursor line's indentation and eats the blank line", function()
     eq(vim.api.nvim_buf_get_lines(target, 0, -1, false), {
       "int main() {",
       "    for (int i = 0; i < n; i++) {",
@@ -94,45 +97,46 @@ return function(h)
     })
   end)
 
-  test("含 ${1:n} 的模板會走 snippet 展開", function()
+  test("a template containing ${1:n} goes through snippet expansion", function()
     local buf = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_win_set_buf(0, buf)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "" })
     require("template-center.insert").insert("snip")
 
     eq(vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1], "int n;")
-    truthy(vim.snippet.active(), "應該停在 placeholder 上等你打字")
-    -- expand 會把 placeholder 選起來（select mode），收工前要退回 normal mode。
+    truthy(vim.snippet.active(), "it should be sitting on the placeholder waiting for input")
+    -- expand selects the placeholder (select mode); get back to normal mode
+    -- before moving on.
     vim.snippet.stop()
     vim.cmd("stopinsert")
   end)
 
-  -- -------------------------------------------------------------- telescope --
+  -- ---------------------------------------------------------------- telescope --
 
-  -- 沒裝 telescope 就跳過；CI 上跑得起來的是上面的 fallback 那條路。
+  -- Skipped when telescope isn't installed; CI exercises the fallback above.
   if pcall(require, "telescope") then
-    test("telescope 後端：欄位、ordinal、預覽用的 path 都對", function()
+    test("telescope backend: columns, ordinal and the previewer's path", function()
       config.options.picker = "telescope"
       require("template-center.picker").find()
 
       local prompt_bufnr = vim.api.nvim_get_current_buf()
       local picker = require("telescope.actions.state").get_current_picker(prompt_bufnr)
-      truthy(picker, "telescope picker 應該開起來了")
-      eq(picker.prompt_title, "插入模板")
+      truthy(picker, "the telescope picker should be open")
+      eq(picker.prompt_title, "Insert template")
 
       local entry = picker.finder.entry_maker(store.entry_of("cpp/graph/loop.cpp"))
-      eq(entry.ordinal, "loop cpp/graph 最大流", "分類與說明也要吃得到模糊搜尋")
-      eq(entry.path, store.abspath("cpp/graph/loop.cpp"), "previewer 靠這個欄位上色")
-      truthy(entry.display(entry):match("^loop%s+cpp/graph%s+最大流$"), "三欄顯示")
+      eq(entry.ordinal, "loop cpp/graph max flow", "category and description feed the fuzzy matcher")
+      eq(entry.path, store.abspath("cpp/graph/loop.cpp"), "the previewer highlights based on this field")
+      truthy(entry.display(entry):match("^loop%s+cpp/graph%s+max flow$"), "three columns")
 
       require("telescope.actions").close(prompt_bufnr)
       config.options.picker = "select"
     end)
   else
-    print("  skip telescope 後端（沒裝 telescope.nvim）")
+    print("  skip telescope backend (telescope.nvim not installed)")
   end
 
-  -- --------------------------------------------------------------- explorer --
+  -- ----------------------------------------------------------------- explorer --
 
   local explorer = require("template-center.explorer")
   explorer.open()
@@ -143,17 +147,17 @@ return function(h)
     return vim.api.nvim_buf_get_lines(ebuf, 0, -1, false)
   end
 
-  test("側邊欄是可寫回的 acwrite buffer", function()
+  test("the sidebar is a writable acwrite buffer", function()
     eq(vim.bo[ebuf].buftype, "acwrite")
     eq(vim.bo[ebuf].filetype, "templatecenter")
-    eq(vim.wo[ewin].conceallevel, 3, "行首的 id 要藏起來")
+    eq(vim.wo[ewin].conceallevel, 3, "the leading id has to be hidden")
   end)
 
-  test("一開始全部收合", function()
+  test("everything starts collapsed", function()
     eq(lines(), { "/1 cpp/" })
   end)
 
-  test("<CR> 展開目錄", function()
+  test("<CR> expands a directory", function()
     explorer.actions.open_or_toggle()
     eq(lines(), { "/1 cpp/", "/2   graph/", "/3   snip.cpp" })
 
@@ -162,62 +166,62 @@ return function(h)
     eq(lines(), { "/1 cpp/", "/2   graph/", "/3     loop.cpp", "/4   snip.cpp" })
   end)
 
-  test(":w 一次套用改名、往左縮排搬移、新增目錄", function()
+  test(":w applies a rename, an outdent-move and a new directory at once", function()
     vim.api.nvim_buf_set_lines(ebuf, 0, -1, false, {
       "/1 cpp/",
       "/2   graph/",
       "  math/",
-      "/3   maxflow.cpp", -- 改名 + 從 graph/ 搬到 cpp/
+      "/3   maxflow.cpp", -- renamed and moved out of graph/ into cpp/
       "/4   snip.cpp",
     })
     truthy(vim.bo[ebuf].modified)
     vim.cmd("silent write")
 
-    truthy(store.exists("cpp/maxflow.cpp"), "改名+搬移應該生效")
-    truthy(not store.exists("cpp/graph/loop.cpp"), "舊路徑應該不見了")
+    truthy(store.exists("cpp/maxflow.cpp"), "the rename and move should both land")
+    truthy(not store.exists("cpp/graph/loop.cpp"), "the old path should be gone")
     eq(store.read("cpp/maxflow.cpp"), {
       "for (int i = 0; i < n; i++) {",
       "    work(i);",
       "}",
-    }, "內容不該被動到")
-    eq(store.get_desc("cpp/maxflow.cpp"), "最大流", "說明要跟著搬")
-    truthy(vim.uv.fs_stat(vim.fs.joinpath(dir, "cpp/math")), "math/ 應該被建出來")
-    truthy(not vim.bo[ebuf].modified, "存完要清掉 modified")
+    }, "contents must not be touched")
+    eq(store.get_desc("cpp/maxflow.cpp"), "max flow", "the description follows along")
+    truthy(vim.uv.fs_stat(vim.fs.joinpath(dir, "cpp/math")), "math/ should have been created")
+    truthy(not vim.bo[ebuf].modified, "'modified' is cleared once written")
     eq(lines(), {
       "/1 cpp/",
       "/2   graph/",
       "/3   math/",
       "/4   maxflow.cpp",
       "/5   snip.cpp",
-    }, "存完要重畫並重新發 id")
+    }, "a write redraws and hands out fresh ids")
   end)
 
-  test("刪掉一行 = 把檔案搬進 .trash", function()
+  test("deleting a line moves the file into .trash", function()
     vim.api.nvim_buf_set_lines(ebuf, 4, 5, false, {})
     vim.cmd("silent write")
 
     truthy(not store.exists("cpp/snip.cpp"))
-    truthy(#vim.fn.readdir(store.trash_dir()) > 0, ".trash 應該接到東西")
+    truthy(#vim.fn.readdir(store.trash_dir()) > 0, ".trash should have received it")
   end)
 
-  test("編壞的內容整批擋下，:w 不會爆 traceback", function()
+  test("a broken edit is rejected as a batch and :w doesn't blow up", function()
     vim.api.nvim_buf_set_lines(ebuf, 0, -1, false, { "/1 cpp/", "/4       deep.cpp" })
     local ok, err = pcall(vim.cmd, "silent write")
 
-    truthy(ok, "BufWriteCmd 不該把錯誤往上丟：" .. tostring(err))
-    truthy(vim.bo[ebuf].modified, "沒套用成功就要維持 modified，:wq 才不會吞掉變更")
-    truthy(store.exists("cpp/maxflow.cpp"), "擋下時檔案系統不該被動到")
+    truthy(ok, "BufWriteCmd must not rethrow: " .. tostring(err))
+    truthy(vim.bo[ebuf].modified, "staying modified is what stops :wq from swallowing the edit")
+    truthy(store.exists("cpp/maxflow.cpp"), "nothing on disk should have moved")
     truthy(not store.exists("deep.cpp"))
   end)
 
   explorer.close()
 
-  -- ------------------------------------------------------- visual mode 按鍵 --
+  -- ------------------------------------------------------ visual mode mapping --
 
-  -- 換一個乾淨的模板庫，才不會干擾上面那串情境。
-  test("visual mode 按鍵讀到的是這次框選的範圍", function()
+  -- A clean library, so this doesn't disturb the scenario above.
+  test("a visual mode mapping reads the selection you just made", function()
     fresh({ picker = "select" })
-    answer_with({ "body", "", "" }) -- 名稱、分類（留空 = 放最外層）、說明
+    answer_with({ "body", "", "" }) -- name, category (empty = top level), description
 
     vim.api.nvim_win_set_buf(0, src)
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
@@ -225,24 +229,24 @@ return function(h)
       require("template-center").save_selection()
     end, { buffer = src })
 
-    -- 用 :normal（不加 !，才會套用 mapping）而不是 feedkeys：不必跟 typeahead
-    -- 和跳脫序列的解析搶時序，測起來才穩。
+    -- :normal (without the bang, so mappings apply) rather than feedkeys: no
+    -- racing against typeahead or escape sequence parsing, so it stays stable.
     vim.cmd("normal Vjj" .. vim.keycode("<F9>"))
 
     eq(store.read("body.cpp"), {
       "int main() {",
       "    for (int i = 0; i < n; i++) {",
       "        work(i);",
-    }, "應該存到 1~3 行，而不是上一次留下的 '< '> 範圍")
+    }, "should be lines 1-3, not whatever '< and '> pointed at before")
   end)
 
-  -- ------------------------------------------------------------ 其他插入位置 --
+  -- ---------------------------------------------------------- other positions --
 
   fresh({ picker = "select" })
   store.write("cpp/graph/dinic.cpp", { "struct Dinic {};" })
   store.write("hdr.cpp", { "#include <set>" })
 
-  test("position=top 插在最後一個 #include 之後", function()
+  test("position=top lands after the last #include", function()
     local buf = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_win_set_buf(0, buf)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
@@ -257,7 +261,7 @@ return function(h)
     eq(vim.api.nvim_buf_get_lines(buf, 0, -1, false)[3], "#include <set>")
   end)
 
-  test("position=above 插在游標行上面", function()
+  test("position=above lands on the line before the cursor", function()
     local buf = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_win_set_buf(0, buf)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "a", "b" })
@@ -267,13 +271,13 @@ return function(h)
     eq(vim.api.nvim_buf_get_lines(buf, 0, -1, false), { "a", "#include <set>", "b" })
   end)
 
-  test("store.find 名稱與完整路徑都查得到", function()
+  test("store.find takes either a name or a full relative path", function()
     eq(store.find("dinic").id, "cpp/graph/dinic.cpp")
     eq(store.find("cpp/graph/dinic.cpp").name, "dinic")
-    eq(store.find("沒這個東西"), nil)
+    eq(store.find("no such thing"), nil)
   end)
 
-  test("picker 的 reveal 會展開祖先並把游標停在該模板上", function()
+  test("the picker's reveal expands the ancestors and lands on the template", function()
     require("template-center.picker").actions.reveal(store.entry_of("cpp/graph/dinic.cpp"))
 
     eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), {
@@ -285,7 +289,7 @@ return function(h)
     eq(vim.api.nvim_win_get_cursor(0)[1], 3)
   end)
 
-  test("<C-p> 開得出預覽浮窗", function()
+  test("<C-p> opens a preview float", function()
     local before = #vim.api.nvim_list_wins()
     explorer.actions.preview()
     eq(#vim.api.nvim_list_wins(), before + 1)

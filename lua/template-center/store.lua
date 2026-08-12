@@ -3,11 +3,14 @@ local util = require("template-center.util")
 
 local uv = vim.uv or vim.loop
 
---- 模板庫。這是整個 plugin 唯一直接碰檔案系統的地方。
+--- The template library. This is the only place in the plugin that touches the
+--- filesystem directly.
 ---
---- 模板就是真實檔案，副檔名保留原樣，目錄即分類：`cpp/graph/dinic.cpp`。
---- 附屬資訊放在 root 下的 `.template-center.json`，只存說明文字與側邊欄展開狀態；
---- 檔案系統永遠是真相來源，json 壞掉或缺欄位都要能自我修復。
+--- Templates are real files, extensions are kept as they are, and directories
+--- are categories: `cpp/graph/dinic.cpp`. Side information lives in
+--- `.template-center.json` at the root and holds nothing but descriptions and
+--- the sidebar's expansion state; the filesystem is always the source of truth,
+--- so a missing or broken JSON file has to heal itself.
 local M = {}
 
 local META_FILE = ".template-center.json"
@@ -15,15 +18,15 @@ local TRASH_DIR = ".trash"
 local STASH_DIR = ".tmp-swap"
 
 ---@class tc.Entry
----@field id string 相對路徑，例如 "cpp/graph/dinic.cpp"
----@field name string 不含副檔名的檔名，例如 "dinic"
----@field category string 所在目錄，例如 "cpp/graph"（root 為 ""）
----@field path string 絕對路徑
----@field desc string 說明，沒有則為 ""
+---@field id string relative path, e.g. "cpp/graph/dinic.cpp"
+---@field name string filename without the extension, e.g. "dinic"
+---@field category string containing directory, e.g. "cpp/graph" ("" at the root)
+---@field path string absolute path
+---@field desc string description, "" when there is none
 
 ---@class tc.Node
----@field name string 顯示名稱（不含路徑）
----@field path string 相對路徑
+---@field name string display name, without any path
+---@field path string relative path
 ---@field type "file"|"directory"
 
 ---@return string
@@ -40,7 +43,7 @@ function M.abspath(relpath)
   return vim.fs.joinpath(M.root(), relpath)
 end
 
----@param path string 絕對路徑
+---@param path string absolute path
 ---@return "file"|"directory"|nil
 local function stat_type(path)
   local st = uv.fs_stat(path)
@@ -60,7 +63,7 @@ function M.ensure()
   vim.fn.mkdir(M.root(), "p")
 end
 
--- ---------------------------------------------------------------- metadata --
+-- ----------------------------------------------------------------- metadata --
 
 ---@type { desc: table<string, string>, expanded: table<string, boolean> }?
 local meta = nil
@@ -105,13 +108,13 @@ local function save_meta()
   local encoded = vim.json.encode(meta)
   local ok = pcall(vim.fn.writefile, vim.split(encoded, "\n"), tmp)
   if not ok then
-    util.warn("無法寫入 " .. META_FILE)
+    util.warn("Could not write " .. META_FILE)
     return
   end
   uv.fs_rename(tmp, path)
 end
 
---- 測試用：丟掉快取，下次讀取重新載入。
+--- Testing hook: drop the cache so the next read reloads from disk.
 function M.reload_meta()
   meta = nil
 end
@@ -143,9 +146,10 @@ function M.set_expanded(relpath, value)
   save_meta()
 end
 
---- 搬移／刪除檔案時，把 meta 裡掛在該路徑（或其子路徑）上的資料跟著搬。
+--- Carry metadata attached to a path (or anything under it) along with a move
+--- or a delete.
 ---@param old string
----@param new string? nil 表示刪除
+---@param new string? nil means the entry was deleted
 local function migrate_meta(old, new)
   local m = load_meta()
   local prefix = old .. "/"
@@ -169,7 +173,7 @@ local function migrate_meta(old, new)
   save_meta()
 end
 
--- ------------------------------------------------------------------- 讀取 --
+-- ------------------------------------------------------------------ reading --
 
 ---@param name string
 ---@return boolean
@@ -177,8 +181,9 @@ local function is_hidden(name)
   return vim.startswith(name, ".")
 end
 
---- 列出某個目錄的直接子項目，目錄排前面，各自依名稱排序。
----@param relpath string? "" 或 nil 表示 root
+--- List the direct children of a directory: directories first, each group
+--- sorted by name.
+---@param relpath string? "" or nil for the root
 ---@return tc.Node[]
 function M.children(relpath)
   relpath = relpath or ""
@@ -196,7 +201,7 @@ function M.children(relpath)
       break
     end
     if not is_hidden(name) then
-      -- symlink 等其他型別一律當檔案處理。
+      -- Anything that is not a directory (symlinks included) counts as a file.
       local kind = type_ == "directory" and "directory" or "file"
       if type_ == "link" then
         kind = stat_type(vim.fs.joinpath(dir, name)) or "file"
@@ -236,7 +241,7 @@ function M.entry_of(relpath)
   }
 end
 
---- 遞迴列出所有模板檔案。
+--- Every template file, recursively.
 ---@return tc.Entry[]
 function M.list()
   M.ensure()
@@ -265,7 +270,8 @@ function M.list()
   return entries
 end
 
---- 依名稱或完整相對路徑找模板。名稱不唯一時回傳第一個（list 的排序）。
+--- Look a template up by name or by full relative path. When a name is not
+--- unique the first match wins, in the order `list` returns.
 ---@param query string
 ---@return tc.Entry?
 function M.find(query)
@@ -283,22 +289,22 @@ function M.find(query)
   return nil
 end
 
----@param entry tc.Entry|string entry 或相對路徑
+---@param entry tc.Entry|string an entry or a relative path
 ---@return string[]? lines
 ---@return string? err
 function M.read(entry)
   local path = type(entry) == "string" and M.abspath(entry) or entry.path
   if not uv.fs_stat(path) then
-    return nil, "檔案不存在：" .. path
+    return nil, "no such file: " .. path
   end
   local ok, lines = pcall(vim.fn.readfile, path)
   if not ok then
-    return nil, "讀取失敗：" .. path
+    return nil, "could not read " .. path
   end
   return lines
 end
 
--- ------------------------------------------------------------------- 寫入 --
+-- ------------------------------------------------------------------ writing --
 
 ---@param relpath string
 ---@return boolean ok
@@ -361,8 +367,8 @@ function M.move(old, new)
   return true
 end
 
----@param src string 絕對路徑
----@param dst string 絕對路徑
+---@param src string absolute path
+---@param dst string absolute path
 ---@return boolean ok
 ---@return string? err
 local function copy_recursive(src, dst)
@@ -378,7 +384,7 @@ local function copy_recursive(src, dst)
   vim.fn.mkdir(dst, "p")
   local handle = uv.fs_scandir(src)
   if not handle then
-    return false, "無法讀取目錄：" .. src
+    return false, "could not read directory " .. src
   end
   while true do
     local name = uv.fs_scandir_next(handle)
@@ -420,7 +426,7 @@ function M.copy(old, new)
   return true
 end
 
----@param path string 絕對路徑
+---@param path string absolute path
 ---@return boolean ok
 ---@return string? err
 local function remove_recursive(path)
@@ -450,8 +456,9 @@ local function remove_recursive(path)
   return ok and true or false, err and tostring(err) or nil
 end
 
---- 刪除。預設不是真的刪掉，而是搬進 `<root>/.trash/<timestamp>/`，
---- 因為側邊欄一個 `dd` 就能刪東西，手滑的代價不該是永久性的。
+--- Delete. By default nothing is actually removed; it moves into
+--- `<root>/.trash/<timestamp>/` instead, because a single `dd` in the sidebar
+--- deletes a file and a slip should not be permanent.
 ---@param relpath string
 ---@return boolean ok
 ---@return string? err
@@ -467,7 +474,8 @@ function M.remove(relpath)
     local parent = vim.fs.dirname(dest)
     vim.fn.mkdir(parent, "p")
 
-    -- 同一秒內刪掉同名檔案時避開撞名。
+    -- Avoid a clash when two files with the same name are deleted in the same
+    -- second.
     local candidate, n = dest, 1
     while uv.fs_stat(candidate) do
       candidate = ("%s.%d"):format(dest, n)
@@ -495,8 +503,10 @@ function M.trash_dir()
   return vim.fs.joinpath(M.root(), TRASH_DIR)
 end
 
---- 把佔住目標位置的東西暫時挪開（例如 a↔b 互換名字），回傳它的暫存相對路徑。
---- 暫存區在模板庫內部，才不會跨裝置搬檔；名稱以 `.` 開頭所以不會被列出來。
+--- Move whatever is occupying a target path out of the way (two files swapping
+--- names, say) and return where it went. The stash lives inside the library so
+--- the rename never crosses devices, and its name starts with a dot so it never
+--- shows up in listings.
 ---@param relpath string
 ---@return string? stashed
 ---@return string? err
@@ -518,11 +528,12 @@ function M.stash(relpath)
   return rel
 end
 
---- 清掉空的暫存區；還有東西留著就保留（代表某個 move 失敗了，別把資料弄丟）。
+--- Remove the stash if it is empty. Anything left behind stays: it means a move
+--- failed, and that data should not be thrown away.
 function M.cleanup_stash()
   local path = M.abspath(STASH_DIR)
   if uv.fs_stat(path) then
-    uv.fs_rmdir(path) -- 非空時會失敗，正是我們要的
+    uv.fs_rmdir(path) -- fails while non-empty, which is what we want
   end
 end
 

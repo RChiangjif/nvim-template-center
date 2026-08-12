@@ -1,5 +1,5 @@
--- 測試與手動試玩用的最小設定：
---   nvim --headless -u tests/minimal_init.lua -c "lua require('tests.run')()" -c qa
+-- Minimal config for the tests and for poking at the plugin by hand:
+--   nvim --headless -u tests/minimal_init.lua -c "luafile tests/run.lua" -c 'qa!'
 --   nvim -u tests/minimal_init.lua some.cpp
 local this = debug.getinfo(1, "S").source:sub(2)
 local root = vim.fs.dirname(vim.fs.dirname(vim.fs.normalize(this)))
@@ -15,8 +15,8 @@ package.path = table.concat({
 vim.opt.swapfile = false
 vim.opt.shada = ""
 
--- 這台機器上有裝 telescope 的話就順便掛上，好連 telescope 那條路一起測；
--- 沒有的話一切照走 vim.ui.select fallback。
+-- Pick up telescope if this machine happens to have it, so that backend gets
+-- exercised too. Without it everything runs through the vim.ui.select fallback.
 for _, plugin in ipairs({ "plenary.nvim", "telescope.nvim" }) do
   local path = vim.fs.joinpath(vim.fn.stdpath("data"), "lazy", plugin)
   if vim.uv.fs_stat(path) then
@@ -25,6 +25,6 @@ for _, plugin in ipairs({ "plenary.nvim", "telescope.nvim" }) do
 end
 
 require("template-center").setup({
-  -- 手動試玩時不要碰到真的模板庫。
+  -- Never touch the real library while playing around.
   dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "template-center-dev"),
 })

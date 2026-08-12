@@ -1,8 +1,9 @@
 -- nvim --headless -u tests/minimal_init.lua -c "luafile tests/run.lua" -c 'qa!'
--- 或 make test
+-- or: make test
 --
--- 這裡刻意用 dofile 而不是 require：telescope 自己也有 lua/tests/helpers.lua，
--- 一旦它進了 runtimepath，require("tests.helpers") 就會拿到它的版本。
+-- dofile rather than require on purpose: telescope ships its own
+-- lua/tests/helpers.lua, and once it is on the runtimepath
+-- require("tests.helpers") picks up that one instead.
 local dir = vim.fs.dirname(vim.fs.normalize(debug.getinfo(1, "S").source:sub(2)))
 
 local h = dofile(dir .. "/helpers.lua")

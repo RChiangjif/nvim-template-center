@@ -1,18 +1,21 @@
 local util = require("template-center.util")
 
---- 把使用者編輯過的 buffer 內容讀回成一棵樹。純函式，不碰檔案系統。
+--- Read the edited buffer back into a tree. Pure: it never touches the
+--- filesystem.
 ---
---- 樹的結構是由**縮排**決定的，不是由 id 決定 —— 所以把一行往右推一層就等於
---- 把它搬進上面那個目錄。任何一項驗證失敗都整批中止（不做半套），並回報行號。
+--- The structure comes from the **indentation**, not from the ids — pushing a
+--- line one level to the right is how you move it into the directory above.
+--- Any failed check rejects the whole batch (never half of it) and reports the
+--- line number.
 local M = {}
 
 ---@class tc.ParsedNode
----@field id integer? 沒有 id 表示是新增的
+---@field id integer? absent means this line is new
 ---@field name string
 ---@field type "file"|"directory"
 ---@field depth integer
 ---@field lnum integer
----@field path string 新座標下的相對路徑
+---@field path string relative path in the new coordinates
 
 ---@class tc.ParseError
 ---@field lnum integer
@@ -26,12 +29,12 @@ function M.parse(lines, opts)
   local unit = math.max((opts and opts.indent) or 2, 1)
 
   local nodes = {} ---@type tc.ParsedNode[]
-  local stack = {} ---@type table<integer, tc.ParsedNode> depth → 該層最後看到的節點
-  local taken = {} ---@type table<string, integer> "父路徑\0名稱" → 行號
+  local stack = {} ---@type table<integer, tc.ParsedNode> depth → last node seen at that depth
+  local taken = {} ---@type table<string, integer> "parent path\0name" → line number
   local prev_depth = -1
 
   for lnum, line in ipairs(lines) do
-    if line:match("%S") then -- 空行忽略
+    if line:match("%S") then -- blank lines are ignored
       local id, rest = line:match("^/(%d+)%s(.*)$")
       if not id then
         rest = line
@@ -39,7 +42,8 @@ function M.parse(lines, opts)
 
       local ws, body = rest:match("^([ \t]*)(.*)$")
 
-      -- tab 算一整層，避免 expandtab 沒開的人怎麼縮排都對不上。
+      -- A tab counts as a whole level, so indentation still lines up for people
+      -- without 'expandtab'.
       local width = 0
       for ch in ws:gmatch(".") do
         width = width + (ch == "\t" and unit or 1)
@@ -58,23 +62,23 @@ function M.parse(lines, opts)
       end
 
       if depth > prev_depth + 1 then
-        return nil, { lnum = lnum, msg = "縮排一次跳了超過一層" }
+        return nil, { lnum = lnum, msg = "indentation jumps more than one level" }
       end
 
       local parent = depth > 0 and stack[depth - 1] or nil
       if depth > 0 then
         if not parent then
-          return nil, { lnum = lnum, msg = "找不到上一層的目錄" }
+          return nil, { lnum = lnum, msg = "no directory at the level above" }
         end
         if parent.type ~= "directory" then
-          return nil, { lnum = lnum, msg = ("上一層 %q 不是目錄，不能放東西進去"):format(parent.name) }
+          return nil, { lnum = lnum, msg = ("%q is not a directory, nothing can go inside it"):format(parent.name) }
         end
       end
 
       local parent_path = parent and parent.path or ""
       local key = parent_path .. "\0" .. name
       if taken[key] then
-        return nil, { lnum = lnum, msg = ("同一層已經有 %q 了（第 %d 行）"):format(name, taken[key]) }
+        return nil, { lnum = lnum, msg = ("%q already exists at this level (line %d)"):format(name, taken[key]) }
       end
       taken[key] = lnum
 

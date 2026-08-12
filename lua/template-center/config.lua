@@ -1,28 +1,28 @@
 local M = {}
 
 ---@class tc.CaptureConfig
----@field dedent boolean 去掉選取範圍的共同前導空白
----@field ask_category boolean 存檔時詢問分類（目錄）
----@field ask_description boolean 存檔時詢問說明
+---@field dedent boolean strip the selection's common leading whitespace
+---@field ask_category boolean ask for a category (directory) when saving
+---@field ask_description boolean ask for a description when saving
 
 ---@class tc.InsertConfig
----@field position "below"|"above"|"top" 預設插入位置
----@field reindent boolean 依游標所在行的縮排對齊模板
----@field snippet "auto"|boolean 是否用 vim.snippet 展開 placeholder
----@field top_after string[] position="top" 時，插在最後一行符合這些 pattern 之後
+---@field position "below"|"above"|"top" where to put the template by default
+---@field reindent boolean match the indentation of the line the cursor is on
+---@field snippet "auto"|boolean expand placeholders through vim.snippet
+---@field top_after string[] with position="top", insert after the last line matching these
 
 ---@class tc.ExplorerConfig
 ---@field side "left"|"right"
 ---@field width integer
----@field indent integer 每一層縮排的空白數
----@field confirm boolean 套用檔案變更前先確認
----@field trash boolean 刪除時搬到 .trash/ 而非真的刪掉
+---@field indent integer spaces per tree level
+---@field confirm boolean confirm before applying file changes
+---@field trash boolean delete into .trash/ instead of unlinking
 ---@field keymaps table<string, string|false>
 
 ---@class tc.Config
----@field dir string 模板庫根目錄
+---@field dir string root of the template library
 ---@field picker "auto"|"telescope"|"select"
----@field extensions table<string, string> filetype → 副檔名
+---@field extensions table<string, string> filetype → extension
 ---@field capture tc.CaptureConfig
 ---@field insert tc.InsertConfig
 ---@field explorer tc.ExplorerConfig
@@ -33,7 +33,7 @@ local defaults = {
 
   picker = "auto",
 
-  -- 只在來源 buffer 沒有副檔名可抄時才會用到。
+  -- Only consulted when the source buffer has no extension to copy.
   extensions = {
     c = "c",
     cpp = "cpp",
@@ -72,8 +72,9 @@ local defaults = {
     indent = 2,
     confirm = true,
     trash = true,
-    -- 設成 false 可停用單一按鍵。這個 buffer 是可以編輯的，所以刻意不佔用
-    -- o / O / dd / cc / p / x / u —— 新增檔案就是 o 打一行，刪除就是 dd。
+    -- Set any entry to false to drop that mapping. This buffer is editable, so
+    -- o / O / dd / cc / p / x / u are deliberately left alone: you add a file by
+    -- typing a line with `o` and delete one with `dd`.
     keymaps = {
       ["<CR>"] = "open_or_toggle",
       ["<Tab>"] = "toggle",
@@ -98,8 +99,9 @@ M.defaults = defaults
 function M.setup(opts)
   M.options = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
 
-  -- keymaps 是「使用者說了算」的表：deep_extend 會保留預設鍵，所以整表覆寫時
-  -- 想拿掉某個鍵要設成 false（而不是省略），這裡把 false 清乾淨。
+  -- keymaps is a table the user owns: deep_extend keeps the defaults around, so
+  -- dropping one means setting it to false rather than omitting it. Clear those
+  -- out here.
   for lhs, action in pairs(M.options.explorer.keymaps) do
     if action == false then
       M.options.explorer.keymaps[lhs] = nil

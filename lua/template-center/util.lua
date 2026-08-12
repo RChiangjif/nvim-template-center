@@ -3,7 +3,7 @@ local M = {}
 local TITLE = "template-center"
 
 ---@param msg string
----@param level integer? vim.log.levels，預設 INFO
+---@param level integer? vim.log.levels, defaults to INFO
 function M.notify(msg, level)
   vim.notify(msg, level or vim.log.levels.INFO, { title = TITLE })
 end
@@ -18,7 +18,7 @@ function M.error(msg)
   M.notify(msg, vim.log.levels.ERROR)
 end
 
---- 去掉所有非空行的共同前導空白。
+--- Strip the leading whitespace shared by every non-blank line.
 ---@param lines string[]
 ---@return string[]
 function M.dedent(lines)
@@ -29,7 +29,8 @@ function M.dedent(lines)
       if prefix == nil then
         prefix = indent
       else
-        -- 取兩者的共同前綴，tab 與空白混用時也不會切錯位置。
+        -- Take the common prefix of the two, so mixed tabs and spaces never get
+        -- cut in the wrong place.
         local i = 0
         while i < #prefix and i < #indent and prefix:sub(i + 1, i + 1) == indent:sub(i + 1, i + 1) do
           i = i + 1
@@ -53,7 +54,7 @@ function M.dedent(lines)
   return out
 end
 
---- 去掉頭尾的空行（存模板時 visual 選取常常多帶一行）。
+--- Drop blank lines from both ends; a visual selection usually picks up one.
 ---@param lines string[]
 ---@return string[]
 function M.trim_blank_lines(lines)
@@ -67,36 +68,36 @@ function M.trim_blank_lines(lines)
   return vim.list_slice(lines, first, last)
 end
 
---- 檔名（不是路徑）合法性檢查。
+--- Validate a single filename (not a path).
 ---@param name string
 ---@return boolean ok
 ---@return string? err
 function M.validate_name(name)
   if name == "" then
-    return false, "名稱不可為空"
+    return false, "name must not be empty"
   end
   if name == "." or name == ".." then
-    return false, ("名稱不可為 %q"):format(name)
+    return false, ("%q is not a usable name"):format(name)
   end
   if name:find("/") or name:find("\\") then
-    return false, ("名稱不可含路徑分隔符號：%q"):format(name)
+    return false, ("name must not contain a path separator: %q"):format(name)
   end
   if name:find("^%.") then
-    return false, ("名稱不可以 . 開頭：%q"):format(name)
+    return false, ("name must not start with a dot: %q"):format(name)
   end
   return true
 end
 
---- 相對路徑合法性檢查（允許 `/` 當分類分隔）。
+--- Validate a relative path, where `/` separates categories.
 ---@param relpath string
 ---@return boolean ok
 ---@return string? err
 function M.validate_relpath(relpath)
   if relpath == "" then
-    return false, "路徑不可為空"
+    return false, "path must not be empty"
   end
   if relpath:find("^/") or relpath:match("^%a:") then
-    return false, "不接受絕對路徑"
+    return false, "absolute paths are not accepted"
   end
   for part in vim.gsplit(relpath, "/", { plain = true }) do
     local ok, err = M.validate_name(part)
@@ -107,7 +108,8 @@ function M.validate_relpath(relpath)
   return true
 end
 
---- 把使用者輸入的名稱整理成可用的檔名：空白轉底線、砍掉危險字元。
+--- Turn user input into a usable filename: spaces to underscores, dangerous
+--- characters dropped.
 ---@param name string
 ---@return string
 function M.sanitize(name)
@@ -119,9 +121,10 @@ function M.sanitize(name)
   return name
 end
 
---- 決定模板檔要用哪個副檔名：優先抄來源 buffer 的，否則查設定表。
+--- Decide which extension a template file should get: copy the source buffer's
+--- if it has one, otherwise consult the config table.
 ---@param bufnr integer
----@return string ext 不含點；抓不到時回傳 "txt"
+---@return string ext without the dot; "txt" when nothing else fits
 function M.extension_for(bufnr)
   local name = vim.api.nvim_buf_get_name(bufnr)
   local ext = name ~= "" and name:match("%.([%w_]+)$") or nil
@@ -134,7 +137,7 @@ function M.extension_for(bufnr)
   return mapped or (ft ~= "" and ft) or "txt"
 end
 
---- 判斷一個視窗是否適合當「插入目標 / 開檔目標」。
+--- Whether a window can serve as an insert or open target.
 ---@param win integer?
 ---@return boolean
 function M.is_usable_win(win)
@@ -142,14 +145,14 @@ function M.is_usable_win(win)
     return false
   end
   if vim.api.nvim_win_get_config(win).relative ~= "" then
-    return false -- 浮動視窗
+    return false -- floating window
   end
   local buf = vim.api.nvim_win_get_buf(win)
   return vim.bo[buf].buftype == "" or vim.bo[buf].buftype == "acwrite"
 end
 
---- 找一個可以拿來開檔的一般視窗，找不到就開一個。
----@param prefer integer? 優先使用的視窗
+--- Find an ordinary window to open a file in, creating one if there is none.
+---@param prefer integer? window to use if it still works
 ---@return integer win
 function M.pick_target_win(prefer)
   if M.is_usable_win(prefer) then

@@ -1,8 +1,9 @@
---- nvim-template-center：競賽程式模板庫。
+--- nvim-template-center: a competitive programming template library.
 ---
----   * visual mode 框選 → 命名 → 存進模板庫
----   * 搜尋視窗（telescope，沒裝就退回 vim.ui.select）依名稱找模板並插入
----   * 可展開收合、而且可以直接編輯的模板庫側邊欄
+---   * select in visual mode, name it, and it's in the library
+---   * a picker (telescope, or vim.ui.select when it isn't installed) finds a
+---     template by name and inserts it
+---   * a collapsible sidebar for the library that you can edit like a buffer
 local M = {}
 
 ---@param opts tc.Config?
@@ -11,13 +12,14 @@ function M.setup(opts)
   require("template-center.commands").setup()
 end
 
---- 把選取範圍（沒有 range 就是整個 buffer）存成模板。
+--- Save the range (or the whole buffer, without one) as a template.
 ---@param opts { line1: integer?, line2: integer?, bufnr: integer?, name: string? }?
 function M.save(opts)
   require("template-center.capture").save(opts)
 end
 
---- 從 visual mode 呼叫：先離開 visual mode 讓 '< '> 落定，再讀取範圍。
+--- For visual mode mappings: leave visual mode first so '< and '> settle, then
+--- read the range.
 function M.save_selection()
   vim.cmd('execute "normal! \\<Esc>"')
   local line1 = vim.fn.line("'<")
@@ -25,19 +27,19 @@ function M.save_selection()
   require("template-center.capture").save({ line1 = line1, line2 = line2 })
 end
 
---- 開搜尋視窗，選了就插入目前的 buffer。
+--- Open the picker; the choice is inserted into the current buffer.
 ---@param opts table?
 function M.find(opts)
   require("template-center.picker").find(opts)
 end
 
---- 開搜尋視窗，選了就開啟模板檔本身來編輯。
+--- Open the picker; the choice is opened for editing.
 ---@param opts table?
 function M.edit(opts)
   require("template-center.picker").open(opts)
 end
 
---- 直接依名稱插入。
+--- Insert by name.
 ---@param name string
 ---@param opts table?
 function M.insert(name, opts)
@@ -54,7 +56,7 @@ function M.open_tree(opts)
   require("template-center.explorer").open(opts)
 end
 
---- 模板庫根目錄。
+--- Root of the template library.
 ---@return string
 function M.root()
   return require("template-center.store").root()

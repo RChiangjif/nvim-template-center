@@ -1,17 +1,20 @@
 local store = require("template-center.store")
 
---- 把模板庫畫成 buffer 的行。
+--- Draw the library as buffer lines.
 ---
---- 行的格式是 `/<id> <縮排><名稱>`，`/<id> ` 由 syntax/templatecenter.vim 隱藏起來
---- （oil.nvim 的做法）。id 只在單次 render 內有效，每次重畫都重新發號。
---- 收合的目錄不展開子節點 —— 沒被畫出來的東西也就不會進 diff，這是「收合的目錄
---- 不會被誤刪」的根本原因。
+--- Every line reads `/<id> <indent><name>`, and `/<id> ` is hidden by
+--- syntax/templatecenter.vim (the trick oil.nvim uses). Ids are only meaningful
+--- within a single render and are handed out afresh on every redraw.
+---
+--- Collapsed directories are not descended into. What never gets drawn never
+--- enters the diff either, which is the whole reason a collapsed directory
+--- cannot be deleted by accident.
 local M = {}
 
 ---@class tc.RenderResult
 ---@field lines string[]
----@field rendered table<integer, tc.Node> id → 節點（節點的 path 是「舊座標」）
----@field line_of table<string, integer> 相對路徑 → 行號（1-indexed）
+---@field rendered table<integer, tc.Node> id → node (whose path is in "old" coordinates)
+---@field line_of table<string, integer> relative path → line number (1-indexed)
 
 ---@param opts { expanded: table<string, boolean>, indent: integer }
 ---@return tc.RenderResult
@@ -43,7 +46,7 @@ function M.build(opts)
   return { lines = lines, rendered = rendered, line_of = line_of }
 end
 
---- 取出某一行的 id。
+--- Pull the id out of a line.
 ---@param line string
 ---@return integer?
 function M.id_of(line)

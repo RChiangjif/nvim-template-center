@@ -1,5 +1,6 @@
-" 側邊欄的行是 `/<id> <縮排><名稱>`，前面的 id 只是給存檔時對照用的，藏起來。
-" 需要視窗有 conceallevel=3（explorer 開視窗時會設）。
+" Sidebar lines read `/<id> <indent><name>`. The id only exists so a write can
+" tell which file each line started as, so hide it. Needs conceallevel=3 on the
+" window, which the explorer sets when it opens.
 if exists("b:current_syntax")
   finish
 endif

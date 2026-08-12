@@ -58,7 +58,8 @@ function M.pick(entries, ctx)
         entry_maker = function(entry)
           return {
             value = entry,
-            -- 分類與說明也吃得到模糊搜尋，打 "graph" 或 "最大流" 都找得到。
+            -- Category and description feed the fuzzy matcher too, so typing
+            -- "graph" or "max flow" finds the template just as well.
             ordinal = table.concat({ entry.name, entry.category, entry.desc }, " "),
             display = make_display,
             path = entry.path,

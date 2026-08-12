@@ -32,7 +32,7 @@ function M.truthy(value, what)
   end
 end
 
---- 每個測試拿一個乾淨的模板庫。
+--- A clean library for each test.
 ---@param opts table?
 ---@return string dir
 function M.fresh(opts)

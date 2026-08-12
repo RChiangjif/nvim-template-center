@@ -1,5 +1,5 @@
---- `:TemplateCenter <子命令>`。這個檔案在啟動時就會被 require，所以裡面
---- 一律延後 require，不要在載入時就把整個 plugin 拉進來。
+--- `:TemplateCenter <subcommand>`. This file is required at startup, so every
+--- require inside it is deferred rather than pulling the whole plugin in.
 local M = {}
 
 ---@type table<string, fun(args: string[], opts: table)>
@@ -57,7 +57,7 @@ function M.setup()
     local fn = subcommands[name]
     if not fn then
       vim.notify(
-        ("未知的子命令 %q，可用：%s"):format(name, table.concat(order, " ")),
+        ("Unknown subcommand %q. Available: %s"):format(name, table.concat(order, " ")),
         vim.log.levels.ERROR,
         { title = "template-center" }
       )
@@ -67,7 +67,7 @@ function M.setup()
   end, {
     nargs = "*",
     range = true,
-    desc = "模板庫：" .. table.concat(order, " / "),
+    desc = "Template library: " .. table.concat(order, " / "),
     complete = function(arglead, cmdline)
       local parts = vim.split(cmdline, "%s+")
       if #parts <= 2 then

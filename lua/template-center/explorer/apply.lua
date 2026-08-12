@@ -1,11 +1,13 @@
 local store = require("template-center.store")
 
---- 比對「編輯後的樹」與「畫出來時的樹」，產出要做哪些檔案操作。
+--- Compare the edited tree against the one that was drawn and work out which
+--- file operations get you from here to there.
 ---
---- 座標系是這裡最容易搞混的地方：
----   * parse 出來的 path 是**新座標**（已經反映使用者的改名／搬移）
----   * rendered 裡的 path 是**舊座標**（render 當下的實際位置）
---- 所以套用時只有「來源」需要隨著已完成的搬移改寫，目標一律是最終位置。
+--- The coordinate systems are the easy thing to confuse:
+---   * paths out of `parse` are in **new** coordinates (renames already applied)
+---   * paths in `rendered` are in **old** coordinates (where things were drawn)
+--- So while applying, only sources need rewriting as earlier moves land;
+--- targets are always final.
 local M = {}
 
 ---@class tc.Op
@@ -37,7 +39,7 @@ function M.plan(parsed, rendered, opts)
   local exists = (opts and opts.exists) or store.exists
 
   local seen = {} ---@type table<integer, boolean>
-  local sources = {} ---@type table<string, boolean> 畫出來時就存在的東西（舊座標）
+  local sources = {} ---@type table<string, boolean> what existed when we drew (old coordinates)
   for _, node in pairs(rendered) do
     sources[node.path] = true
   end
@@ -47,7 +49,7 @@ function M.plan(parsed, rendered, opts)
 
   for _, node in ipairs(parsed) do
     if targets[node.path] then
-      return nil, { lnum = node.lnum, msg = ("%q 重複了（第 %d 行）"):format(node.path, targets[node.path]) }
+      return nil, { lnum = node.lnum, msg = ("%q appears twice (line %d)"):format(node.path, targets[node.path]) }
     end
     targets[node.path] = node.lnum
 
@@ -55,21 +57,21 @@ function M.plan(parsed, rendered, opts)
 
     if old then
       if old.type ~= node.type then
-        local what = old.type == "directory" and "目錄" or "檔案"
-        return nil, { lnum = node.lnum, msg = ("%q 原本是%s，不能改成另一種"):format(old.path, what) }
+        local what = old.type == "directory" and "a directory" or "a file"
+        return nil, { lnum = node.lnum, msg = ("%q started out as %s and cannot become the other"):format(old.path, what) }
       end
 
       if seen[node.id] then
-        -- 同一個 id 出現第二次 = 使用者複製了那一行。
+        -- The same id showing up twice means the line was duplicated.
         if old.path == node.path then
-          return nil, { lnum = node.lnum, msg = ("%q 出現兩次，複製的那一份要改個名字"):format(node.path) }
+          return nil, { lnum = node.lnum, msg = ("%q appears twice; give the copy a different name"):format(node.path) }
         end
         copies[#copies + 1] = { kind = "copy", src = old.path, dst = node.path, type = node.type }
       else
         seen[node.id] = true
         if old.path ~= node.path then
           if node.type == "directory" and is_under(node.path, old.path) then
-            return nil, { lnum = node.lnum, msg = ("不能把 %q 搬進它自己底下"):format(old.path) }
+            return nil, { lnum = node.lnum, msg = ("%q cannot be moved inside itself"):format(old.path) }
           end
           moves[#moves + 1] =
             { kind = "move", src = old.path, dst = node.path, type = node.type, lnum = node.lnum }
@@ -82,15 +84,16 @@ function M.plan(parsed, rendered, opts)
     end
   end
 
-  -- 沒有出現在 buffer 裡的 id 就是被刪掉的。收合目錄的子節點從來沒被畫出來，
-  -- 自然不在 rendered 裡，所以不會被誤刪。
+  -- Any id that is no longer in the buffer was deleted. Children of a collapsed
+  -- directory were never drawn, so they are not in `rendered` and can't be
+  -- caught up in this.
   local deletes = {}
   for id, node in pairs(rendered) do
     if not seen[id] then
       deletes[#deletes + 1] = { kind = "delete", src = node.path, type = node.type }
     end
   end
-  -- 整個目錄被刪時，底下的子項目不用再各刪一次。
+  -- When a whole directory goes, its children don't need deleting one by one.
   deletes = vim.tbl_filter(function(op)
     for _, other in ipairs(deletes) do
       if other ~= op and other.type == "directory" and is_under(op.src, other.src) and op.src ~= other.src then
@@ -100,27 +103,29 @@ function M.plan(parsed, rendered, opts)
     return true
   end, deletes)
 
-  -- 父子關係整個反轉過來（把 a/b 拉出來當 a 的上層）沒辦法用一連串 rename 做完，
-  -- 硬做會卡在中間留下半套結果，所以直接擋下來，請使用者分兩次存檔。
-  for _, a in ipairs(moves) do
-    for _, b in ipairs(moves) do
-      if a ~= b and is_under(b.src, a.src) and is_under(a.dst, b.dst) then
-        return nil, {
-          lnum = b.lnum or 1,
-          msg = ("%q 和 %q 的上下層關係整個反過來了，請先存一次檔搬其中一個，再搬另一個"):format(a.src, b.src),
-        }
-      end
-    end
-  end
-
-  -- 目標位置已經有東西，而且那東西不是某個即將讓位的來源 → 中止。
-  -- 收合目錄裡「看不見」的檔案就是靠這一關擋下來的。
+  -- Something is already sitting at a target, and it isn't a source that is
+  -- about to move out of the way. This is the check that catches files hidden
+  -- inside a collapsed directory.
   for _, list in ipairs({ mkdirs, creates, moves, copies }) do
     for _, op in ipairs(list) do
       if not sources[op.dst] and exists(op.dst) then
         return nil, {
           lnum = targets[op.dst] or 1,
-          msg = ("%q 已經存在（可能在收合起來的目錄裡）"):format(op.dst),
+          msg = ("%q already exists (possibly inside a collapsed directory)"):format(op.dst),
+        }
+      end
+    end
+  end
+
+  -- A parent and child trading places (pulling a/b out to sit above a) can't be
+  -- done as a sequence of renames; forcing it would stall halfway and leave a
+  -- mess. Reject it and ask for two writes instead.
+  for _, a in ipairs(moves) do
+    for _, b in ipairs(moves) do
+      if a ~= b and is_under(b.src, a.src) and is_under(a.dst, b.dst) then
+        return nil, {
+          lnum = b.lnum or 1,
+          msg = ("%q and %q are swapping parent and child; move one, write, then move the other"):format(a.src, b.src),
         }
       end
     end
@@ -147,11 +152,11 @@ end
 ---@return string[]
 function M.summary(ops)
   local label = {
-    mkdir = "新增目錄",
-    create = "新增檔案",
-    move = "搬移",
-    copy = "複製",
-    delete = "刪除",
+    mkdir = "new directory",
+    create = "new file",
+    move = "move",
+    copy = "copy",
+    delete = "delete",
   }
   local trash = require("template-center.config").options.explorer.trash
 
@@ -168,14 +173,15 @@ function M.summary(ops)
   return out
 end
 
---- 真的動檔案系統。回傳失敗訊息的清單（空的代表全部成功）。
+--- Actually touch the filesystem. Returns the failures (empty means everything
+--- went through).
 ---@param ops tc.Op[]
 ---@return string[] errors
 function M.execute(ops)
   local errors = {}
   local rewrites = {} ---@type { from: string, to: string }[]
 
-  --- 把「舊座標」的路徑換算成它現在真正的位置。
+  --- Translate an "old coordinates" path into where it actually lives now.
   ---@param path string
   ---@return string
   local function resolve(path)
@@ -198,8 +204,9 @@ function M.execute(ops)
       ok, err = store.write(op.dst, {})
     elseif op.kind == "move" then
       local src = resolve(op.src)
-      -- 目標被另一個「還沒搬走」的項目佔著（例如 a↔b 互換名字），
-      -- 先把佔位的搬去暫存區，等它自己那筆 move 再從暫存區搬出來。
+      -- The target is held by something that hasn't moved out yet (a and b
+      -- swapping names, say). Stash the occupant; its own move will fetch it
+      -- back out again.
       if src ~= op.dst and store.exists(op.dst) then
         local stashed, serr = store.stash(op.dst)
         if stashed then
@@ -221,7 +228,7 @@ function M.execute(ops)
     end
 
     if not ok then
-      errors[#errors + 1] = ("%s %s：%s"):format(op.kind, op.src or op.dst, err or "失敗")
+      errors[#errors + 1] = ("%s %s: %s"):format(op.kind, op.src or op.dst, err or "failed")
     end
   end
 

@@ -5,11 +5,12 @@ local render = require("template-center.explorer.render")
 local store = require("template-center.store")
 local util = require("template-center.util")
 
---- 模板庫側邊欄：nerdtree 的形狀（可展開收合的樹）+ oil 的編輯方式
---- （整個 buffer 直接改，`:w` 才套用到檔案系統）。
+--- The library sidebar: nerdtree's shape (a collapsible tree) with oil's way of
+--- editing it (change the buffer directly; nothing hits disk until `:w`).
 ---
---- 因為 buffer 要保持可編輯，所以 o / O / dd / cc / p / x / u 一律不佔用：
---- 新增檔案就是 `o` 打一行、刪除就是 `dd`、搬移就是把行往右縮排一層。
+--- The buffer has to stay editable, so o / O / dd / cc / p / x / u are all left
+--- alone: you add a file by typing a line with `o`, delete with `dd`, and move
+--- something by indenting its line one level.
 local M = {}
 
 local BUF_NAME = "template-center://library"
@@ -22,9 +23,9 @@ local state = {
   line_of = {}, ---@type table<string, integer>
 }
 
--- ------------------------------------------------------------------- 繪製 --
+-- ---------------------------------------------------------------- rendering --
 
----@param reveal string? 畫完後把游標移到這個相對路徑上
+---@param reveal string? put the cursor on this relative path once drawn
 local function draw(reveal)
   local buf = state.buf
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
@@ -38,8 +39,9 @@ local function draw(reveal)
   state.rendered = result.rendered
   state.line_of = result.line_of
 
-  -- 重畫不該進 undo 歷史：`u` 一路退回上一次 render 的話，畫面上的 id 會對應
-  -- 到已經失效的節點，接著存檔就會做出莫名其妙的事。
+  -- Redraws must not enter the undo history: undoing back past a render would
+  -- leave ids on screen that point at nodes we no longer know about, and the
+  -- next write would then do something surprising.
   vim.api.nvim_buf_call(buf, function()
     local undolevels = vim.bo[buf].undolevels
     vim.bo[buf].undolevels = -1
@@ -59,13 +61,13 @@ end
 ---@return boolean
 local function has_pending_edits()
   if state.buf and vim.bo[state.buf].modified then
-    util.warn("側邊欄有未儲存的變更：先 :w 套用，或 gr 放棄重讀")
+    util.warn("Sidebar has unsaved edits: :w to apply them, or gr to discard and reload")
     return true
   end
   return false
 end
 
--- ------------------------------------------------------------------- 動作 --
+-- ------------------------------------------------------------------ actions --
 
 ---@return tc.Node?
 local function node_under_cursor()
@@ -148,7 +150,7 @@ end
 
 function actions.refresh()
   if state.buf and vim.bo[state.buf].modified then
-    local choice = vim.fn.confirm("放棄未儲存的變更，重新讀取？", "放棄(&D)\n取消(&C)", 2, "Question")
+    local choice = vim.fn.confirm("Discard unsaved edits and reload?", "&Discard\n&Cancel", 2, "Question")
     if choice ~= 1 then
       return
     end
@@ -161,7 +163,7 @@ function actions.close()
   M.close()
 end
 
--- ------------------------------------------------------------- 浮動視窗 --
+-- ------------------------------------------------------------ floating wins --
 
 ---@param lines string[]
 ---@param opts { title: string, filetype: string?, width: integer?, height: integer? }
@@ -191,7 +193,7 @@ local function float(lines, opts)
   })
   vim.wo[win].wrap = false
 
-  -- 沒有 focus，所以游標一動就收掉。
+  -- It never takes focus, so dismiss it as soon as the cursor moves.
   vim.api.nvim_create_autocmd({ "CursorMoved", "BufLeave", "WinScrolled" }, {
     buffer = state.buf,
     once = true,
@@ -214,7 +216,7 @@ function actions.preview()
     return
   end
   if #lines == 0 then
-    lines = { "（空檔案）" }
+    lines = { "(empty file)" }
   end
   float(lines, {
     title = node.path,
@@ -225,16 +227,16 @@ end
 
 function actions.help()
   local lines = {
-    "模板庫側邊欄",
+    "Template library sidebar",
     "",
-    "  這個 buffer 可以直接編輯，改完 :w 才會套用到檔案：",
-    "    改行內容  → 改名（含副檔名）",
-    "    dd        → 刪除（預設搬到 .trash/，不是真的刪掉）",
-    "    o 打一行  → 新增檔案；結尾加 / 就是新增目錄",
-    "    往右縮排  → 搬進上面那個目錄；往左縮排 → 搬出來",
-    "    yyp 改名  → 複製一份",
+    "  This buffer is editable; changes are applied on :w",
+    "    edit a line     rename (extension included)",
+    "    dd              delete (into .trash/, not actually removed)",
+    "    o + type        new template; end with / to create a directory",
+    "    indent          move into the directory above; outdent to move out",
+    "    yyp + rename    make a copy",
     "",
-    "  按鍵：",
+    "  Mappings:",
   }
   local order = {}
   for lhs, action in pairs(config.options.explorer.keymaps) do
@@ -243,16 +245,17 @@ function actions.help()
   table.sort(order)
   vim.list_extend(lines, order)
   lines[#lines + 1] = ""
-  lines[#lines + 1] = "  模板庫：" .. store.root()
+  lines[#lines + 1] = "  Library: " .. store.root()
 
-  float(lines, { title = "說明", width = 68 })
+  float(lines, { title = "Help", width = 68 })
 end
 
--- ------------------------------------------------------------------- 存檔 --
+-- ------------------------------------------------------------------ writing --
 
---- 在 BufWriteCmd 裡直接 vim.notify 錯誤會讓 `:w` 帶著 E5113 traceback 爆掉，
---- 所以訊息一律排到 autocmd 外面再送。存檔失敗時 modified 保持著，`:wq` 也就
---- 不會把沒套用的變更吞掉。
+--- Calling vim.notify with an error straight from BufWriteCmd makes `:w` blow up
+--- with an E5113 traceback, so messages are always deferred out of the autocmd.
+--- A failed write leaves 'modified' set, which is what stops `:wq` from
+--- swallowing changes that were never applied.
 ---@param fn fun(msg: string)
 ---@param msg string
 local function notify_later(fn, msg)
@@ -261,7 +264,8 @@ local function notify_later(fn, msg)
   end)
 end
 
---- `:w` 的實作：把 buffer 的內容當成「期望的樹」，算出要做哪些檔案操作。
+--- The `:w` implementation: read the buffer as the tree you want, then work out
+--- which file operations get you there.
 function M.save()
   local buf = state.buf
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
@@ -271,7 +275,7 @@ function M.save()
   local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   local nodes, perr = parse.parse(lines, { indent = config.options.explorer.indent })
   if not nodes then
-    notify_later(util.error, ("第 %d 行：%s"):format(perr.lnum, perr.msg))
+    notify_later(util.error, ("line %d: %s"):format(perr.lnum, perr.msg))
     if state.win and vim.api.nvim_win_is_valid(state.win) then
       vim.api.nvim_win_set_cursor(state.win, { perr.lnum, 0 })
     end
@@ -280,13 +284,13 @@ function M.save()
 
   local ops, aerr = apply.plan(nodes, state.rendered)
   if not ops then
-    notify_later(util.error, ("第 %d 行：%s"):format(aerr.lnum, aerr.msg))
+    notify_later(util.error, ("line %d: %s"):format(aerr.lnum, aerr.msg))
     return
   end
 
   if #ops == 0 then
     vim.bo[buf].modified = false
-    notify_later(util.notify, "沒有變更")
+    notify_later(util.notify, "No changes")
     return
   end
 
@@ -294,11 +298,11 @@ function M.save()
     local summary = apply.summary(ops)
     local shown = vim.list_slice(summary, 1, math.min(#summary, 15))
     if #summary > #shown then
-      shown[#shown + 1] = ("…還有 %d 項"):format(#summary - #shown)
+      shown[#shown + 1] = ("… and %d more"):format(#summary - #shown)
     end
-    local msg = table.concat(shown, "\n") .. "\n\n套用這些變更？"
-    if vim.fn.confirm(msg, "套用(&A)\n取消(&C)", 2, "Question") ~= 1 then
-      notify_later(util.notify, "已取消，buffer 內容保留")
+    local msg = table.concat(shown, "\n") .. "\n\nApply these changes?"
+    if vim.fn.confirm(msg, "&Apply\n&Cancel", 2, "Question") ~= 1 then
+      notify_later(util.notify, "Cancelled; the buffer is left as you had it")
       return
     end
   end
@@ -307,13 +311,13 @@ function M.save()
   draw()
 
   if #errors > 0 then
-    notify_later(util.error, ("%d 項失敗：\n%s"):format(#errors, table.concat(errors, "\n")))
+    notify_later(util.error, ("%d operation(s) failed:\n%s"):format(#errors, table.concat(errors, "\n")))
   else
-    notify_later(util.notify, ("已套用 %d 項變更"):format(#ops))
+    notify_later(util.notify, ("Applied %d change(s)"):format(#ops))
   end
 end
 
--- ------------------------------------------------------ buffer / window --
+-- ----------------------------------------------------------- buffer /  window --
 
 ---@return integer buf
 local function ensure_buf()
@@ -337,7 +341,7 @@ local function ensure_buf()
     if fn then
       vim.keymap.set("n", lhs, fn, { buffer = buf, nowait = true, desc = "template-center: " .. action })
     else
-      util.warn(("未知的側邊欄動作：%s（%s）"):format(tostring(action), lhs))
+      util.warn(("Unknown sidebar action %q (mapped to %s)"):format(tostring(action), lhs))
     end
   end
 
@@ -390,10 +394,10 @@ function M.open(opts)
     wo.wrap = false
     wo.winfixwidth = true
     wo.cursorline = true
-    -- 行首的 `/<id> ` 靠這兩個設定藏起來。
+    -- These two are what hide the `/<id> ` prefix at the start of every line.
     wo.conceallevel = 3
     wo.concealcursor = "nvic"
-    wo.winbar = "%#Directory# 模板庫 %*%=%#Comment#g? 說明 %*"
+    wo.winbar = "%#Directory# Templates %*%=%#Comment#g? help %*"
 
     state.win = win
   end
@@ -410,7 +414,8 @@ function M.open(opts)
 end
 
 function M.close()
-  -- 側邊欄是分頁裡最後一個視窗時就留著，不然關掉它等於關掉 Neovim。
+  -- Leave it alone when it is the last window in the tabpage; closing it there
+  -- would mean quitting Neovim.
   if M.is_open() and #vim.api.nvim_tabpage_list_wins(0) > 1 then
     vim.api.nvim_win_close(state.win, false)
     state.win = nil
@@ -426,7 +431,8 @@ function M.toggle(opts)
   end
 end
 
---- 外部（例如剛存了新模板）要求重畫；有未儲存的編輯就不動它。
+--- Redraw on request from elsewhere (a template was just saved, say). Unsaved
+--- edits are left untouched.
 ---@param reveal string?
 function M.refresh(reveal)
   if not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then

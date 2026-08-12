@@ -215,5 +215,3 @@ The suite covers the store's file operations, the sidebar's parse/diff/apply pip
 parent and its child in one write, swapping two names, collapsed directories staying untouched), and
 an end-to-end walk through the whole workflow. If telescope happens to be installed on the machine,
 that backend gets exercised too.
-
-Note that user-facing messages and the in-code comments are written in Traditional Chinese.

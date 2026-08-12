@@ -2,13 +2,13 @@ local config = require("template-center.config")
 local store = require("template-center.store")
 local util = require("template-center.util")
 
---- 把模板插進 buffer。
+--- Put a template into a buffer.
 local M = {}
 
---- position = "top" 時的落點：最後一行符合 top_after 的下面，
---- 沒有任何一行符合就插在檔首。（給 #include 這類前置模板用。）
+--- Where position = "top" lands: just below the last line matching top_after,
+--- or at the very top when nothing matches. Meant for #include-style templates.
 ---@param bufnr integer
----@return integer row 0-indexed 的插入位置
+---@return integer row 0-indexed insertion point
 local function top_row(bufnr)
   local patterns = config.options.insert.top_after or {}
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -27,7 +27,8 @@ end
 ---@param text string
 ---@return boolean
 local function looks_like_snippet(text)
-  -- 收斂到 `$1` / `${1:...}` 這種形狀，避免 shell、LaTeX 裡單純的 `$` 被誤判。
+  -- Limited to the `$1` / `${1:...}` shape so a lone `$` in a shell or LaTeX
+  -- template doesn't get mistaken for a placeholder.
   return text:find("%$%d") ~= nil or text:find("%${%d") ~= nil
 end
 
@@ -45,8 +46,8 @@ local function reindent(lines, indent)
   return out
 end
 
---- 插入模板。
----@param entry tc.Entry|string entry 或模板名稱／相對路徑
+--- Insert a template.
+---@param entry tc.Entry|string an entry, or a template name / relative path
 ---@param opts { win: integer?, position: "below"|"above"|"top"?, reindent: boolean?, snippet: (boolean|"auto")? }?
 ---@return boolean ok
 function M.insert(entry, opts)
@@ -55,7 +56,7 @@ function M.insert(entry, opts)
   if type(entry) == "string" then
     local found = store.find(entry)
     if not found then
-      util.error("找不到模板：" .. entry)
+      util.error("No such template: " .. entry)
       return false
     end
     entry = found
@@ -63,11 +64,11 @@ function M.insert(entry, opts)
 
   local lines, err = store.read(entry)
   if not lines then
-    util.error(err or "讀取失敗")
+    util.error(err or "could not read the template")
     return false
   end
   if #lines == 0 then
-    util.warn("模板是空的：" .. entry.id)
+    util.warn("Template is empty: " .. entry.id)
     return false
   end
 
@@ -77,7 +78,7 @@ function M.insert(entry, opts)
 
   local bufnr = vim.api.nvim_win_get_buf(win)
   if not vim.bo[bufnr].modifiable then
-    util.error("目標 buffer 不可修改")
+    util.error("Target buffer is not modifiable")
     return false
   end
 
@@ -86,7 +87,8 @@ function M.insert(entry, opts)
   local cur_line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
   local blank = not cur_line:match("%S")
 
-  -- 游標停在空行時直接就地插入，不要再往下推一行留個空行。
+  -- On a blank line, insert in place rather than pushing it down and leaving an
+  -- empty line behind.
   local start_row, end_row
   if position == "top" then
     start_row = top_row(bufnr)
@@ -112,8 +114,8 @@ function M.insert(entry, opts)
   local as_snippet = snippet_mode == true or (snippet_mode == "auto" and looks_like_snippet(text))
 
   if as_snippet and vim.snippet and vim.snippet.expand then
-    -- vim.snippet.expand 是從游標處展開的，所以先鋪一行帶好縮排的空行當落點，
-    -- 後續行的縮排交給它自己處理。
+    -- vim.snippet.expand starts from the cursor, so lay down one line carrying
+    -- the right indentation as a landing spot and let it indent the rest.
     vim.api.nvim_buf_set_lines(bufnr, start_row, end_row, false, { indent })
     vim.api.nvim_win_set_cursor(win, { start_row + 1, #indent })
 
@@ -121,7 +123,8 @@ function M.insert(entry, opts)
       return true
     end
 
-    -- snippet 語法有問題就退回純文字插入，不要讓模板整個插不進去。
+    -- Bad snippet syntax shouldn't mean the template can't be inserted at all;
+    -- fall back to plain text.
     vim.api.nvim_buf_set_lines(bufnr, start_row, start_row + 1, false, {})
     end_row = start_row
   end
@@ -132,7 +135,7 @@ function M.insert(entry, opts)
   return true
 end
 
---- 給 `:TemplateCenter insert <name>` 用。
+--- Used by `:TemplateCenter insert <name>`.
 ---@param name string
 ---@param opts table?
 ---@return boolean

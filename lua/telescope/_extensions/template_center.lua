@@ -1,7 +1,7 @@
 -- `:Telescope template_center`
 local ok, telescope = pcall(require, "telescope")
 if not ok then
-  error("template_center 這個 extension 需要 telescope.nvim")
+  error("the template_center extension requires telescope.nvim")
 end
 
 return telescope.register_extension({
